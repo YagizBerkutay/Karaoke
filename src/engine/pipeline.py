@@ -57,6 +57,11 @@ class KaraokePipeline:
         self._is_cancelled = False
         temp = TempManager()
         
+        # Şarkıya özel alt klasör oluştur
+        song_name = Path(mp3_path).name.rsplit(".", 1)[0]
+        song_dir = os.path.join(output_dir, song_name)
+        os.makedirs(song_dir, exist_ok=True)
+        
         try:
             # ── Adım 1: Ses Ayrıştırma ──────────────────────────────────────
             self.check_cancelled()
@@ -72,6 +77,15 @@ class KaraokePipeline:
             self.check_cancelled()
             self.on_step_done(0)
             self.on_log("Ayrıştırma tamamlandı: vocals.wav + accompaniment.wav", "success")
+
+            # Altyapı ses dosyasını çıktı klasörüne kopyala (manuel yeniden render için sakla)
+            accomp_out_path = os.path.join(song_dir, song_name + "_accompaniment.wav")
+            import shutil
+            try:
+                shutil.copy2(accomp_path, accomp_out_path)
+                self.on_log(f"Altyapı ses dosyası kopyalandı: {song_name}_accompaniment.wav", "success")
+            except Exception as e:
+                self.on_log(f"Altyapı ses dosyası kopyalanamadı: {e}", "warning")
 
             # ── Adım 2: Transkripsiyon ───────────────────────────────────────
             self.check_cancelled()
@@ -92,8 +106,7 @@ class KaraokePipeline:
             self.on_log(f"Söz tanıma tamamlandı: {len(words)} kelime bulundu.", "success")
 
             # JSON kelime zamanlamalarını kaydet
-            song_name = Path(mp3_path).name.rsplit(".", 1)[0]
-            words_json_path = os.path.join(output_dir, song_name + "_words.json")
+            words_json_path = os.path.join(song_dir, song_name + "_words.json")
             import json
             try:
                 with open(words_json_path, "w", encoding="utf-8") as f:
@@ -112,7 +125,7 @@ class KaraokePipeline:
             ass_path = temp.path("karaoke.ass")
             self.sub_gen.generate(words, ass_path)
             
-            lrc_path = os.path.join(output_dir, Path(mp3_path).name.rsplit(".", 1)[0] + ".lrc")
+            lrc_path = os.path.join(song_dir, song_name + ".lrc")
             self.sub_gen.generate_lrc(words, lrc_path)
             
             self.check_cancelled()
@@ -128,7 +141,7 @@ class KaraokePipeline:
             if hasattr(self.renderer, "on_log"):
                 self.renderer.on_log = self.on_log
 
-            output_path = os.path.join(output_dir, Path(mp3_path).name.rsplit(".", 1)[0] + "_karaoke.mp4")
+            output_path = os.path.join(song_dir, song_name + "_karaoke.mp4")
             
             # Renderer'a cancellation callback'ini geçiyoruz
             if hasattr(self.renderer, "render_with_cancel"):
