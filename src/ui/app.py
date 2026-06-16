@@ -456,10 +456,11 @@ class KaraokeApp(ctk.CTk):
                 tb = traceback.format_exc()
                 self.after(0, lambda err=err_msg, t=tb: self._on_error(err, t))
 
-    def _step_start(self, index: int):
+    def _step_start(self, index: int, name: str = ""):
         self.after(0, lambda: self.step_progress.set_step_state(index, "running"))
+        step_name = name if name else StepProgressBar.STEPS[index][1]
         self.after(0, lambda: self._set_status(
-            f"Adım {index + 1}/4: {StepProgressBar.STEPS[index][1]}..."
+            f"Adım {index + 1}/4: {step_name}..."
         ))
 
     def _step_progress(self, index: int, value: float):
