@@ -339,39 +339,23 @@ class KaraokeApp(ctk.CTk):
         editor_frame.grid_columnconfigure(0, weight=1)
         editor_frame.grid_rowconfigure(1, weight=1)
         
-        # Header for the table
-        table_header = ctk.CTkFrame(editor_frame, fg_color="transparent")
-        table_header.grid(row=0, column=0, sticky="ew", padx=SIZES["padding_md"], pady=(8, 4))
-        table_header.grid_columnconfigure(0, minsize=40)  # Index
-        table_header.grid_columnconfigure(1, weight=2)   # Word
-        table_header.grid_columnconfigure(2, weight=1)   # Start
-        table_header.grid_columnconfigure(3, weight=1)   # End
+        # Title/Description Label
+        ctk.CTkLabel(editor_frame, text="Şarkı Sözleri (Düzenlenebilir — Typos ve imla hatalarını buradan düzeltebilirsiniz):", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_secondary"]).grid(row=0, column=0, padx=SIZES["padding_md"], pady=(8, 4), sticky="w")
         
-        ctk.CTkLabel(table_header, text="#", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_muted"]).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(table_header, text="Kelime", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_secondary"]).grid(row=0, column=1, sticky="w")
-        ctk.CTkLabel(table_header, text="Başlangıç (s)", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_secondary"]).grid(row=0, column=2, sticky="w")
-        ctk.CTkLabel(table_header, text="Bitiş (s)", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_secondary"]).grid(row=0, column=3, sticky="w")
+        # Lyrics Textbox
+        self.lyrics_textbox = ctk.CTkTextbox(editor_frame, font=ctk.CTkFont(*FONTS["body"]), fg_color=COLORS["bg_input"], border_color=COLORS["border"], border_width=1, text_color=COLORS["text_primary"], wrap="word")
+        self.lyrics_textbox.grid(row=1, column=0, sticky="nsew", padx=SIZES["padding_md"], pady=(0, 4))
+        self.lyrics_textbox.bind("<KeyRelease>", self._update_word_counts)
+        self.lyrics_textbox.bind("<KeyRelease>", lambda e: self._validate_inputs(), add="+")
         
-        # Scrollable table body
-        self.words_scroll = ctk.CTkScrollableFrame(editor_frame, fg_color="transparent", scrollbar_button_color=COLORS["bg_tertiary"])
-        self.words_scroll.grid(row=1, column=0, sticky="nsew", padx=SIZES["padding_md"], pady=(0, 8))
-        self.words_scroll.grid_columnconfigure(0, minsize=40)
-        self.words_scroll.grid_columnconfigure(1, weight=2)
-        self.words_scroll.grid_columnconfigure(2, weight=1)
-        self.words_scroll.grid_columnconfigure(3, weight=1)
+        # Word counts status label
+        self.words_count_label = ctk.CTkLabel(editor_frame, text="Kelime Sayısı: -", font=ctk.CTkFont(*FONTS["small"]), text_color=COLORS["text_muted"])
+        self.words_count_label.grid(row=2, column=0, padx=SIZES["padding_md"], pady=(0, 6), sticky="w")
         
-        # HCI: Windows Scroll speed fix for words_scroll
-        orig_scroll_wheel = self.words_scroll._mouse_wheel_all
-        def new_scroll_wheel(event):
-            event.delta = event.delta * 3
-            orig_scroll_wheel(event)
-        self.words_scroll._mouse_wheel_all = new_scroll_wheel
-        
-        self.word_rows = []
-        
-        # Placeholder label
-        self.placeholder_label = ctk.CTkLabel(self.words_scroll, text="Kelime listesini yüklemek için yukarıdan JSON dosyası seçin.", font=ctk.CTkFont(*FONTS["body"]), text_color=COLORS["text_muted"])
-        self.placeholder_label.grid(row=0, column=0, columnspan=4, pady=40, sticky="ew")
+        # Start state
+        self.lyrics_textbox.insert("end", "Kelime zamanlama JSON dosyasını yüklediğinizde şarkı sözleri burada görünecektir.")
+        self.lyrics_textbox.configure(state="disabled")
+        self.original_words = []
 
         # ── Tab 2 Altı: Manuel Progress & Log Paneli ──
         manual_bottom = ctk.CTkFrame(tab_manual, fg_color="transparent")
@@ -501,55 +485,46 @@ class KaraokeApp(ctk.CTk):
         import json
         try:
             with open(json_path, "r", encoding="utf-8") as f:
-                words = json.load(f)
+                self.original_words = json.load(f)
             
-            if not isinstance(words, list):
+            if not isinstance(self.original_words, list):
                 raise ValueError("JSON kök elementi bir liste olmalıdır.")
             
-            # Clear old rows
-            for row in self.word_rows:
-                for widget in row["widgets"]:
-                    widget.destroy()
-            self.word_rows.clear()
-            self.placeholder_label.grid_forget()
-            
-            # Populate new rows
-            for idx, word_data in enumerate(words):
+            # Group words into lines for display (using ASS line grouping logic)
+            lines = []
+            current_line = []
+            for i, word_data in enumerate(self.original_words):
                 if not isinstance(word_data, dict) or "word" not in word_data or "start" not in word_data or "end" not in word_data:
                     continue
                 
-                # Index label
-                idx_lbl = ctk.CTkLabel(self.words_scroll, text=f"#{idx+1}", font=ctk.CTkFont(*FONTS["body"]), text_color=COLORS["text_muted"])
-                idx_lbl.grid(row=idx, column=0, padx=4, pady=4, sticky="w")
+                # Check for gap to start a new line
+                if current_line and i > 0:
+                    gap = word_data["start"] - self.original_words[i - 1]["end"]
+                    if gap > 1.5:
+                        lines.append(" ".join(current_line))
+                        current_line = []
                 
-                # Word entry
-                w_entry = ctk.CTkEntry(self.words_scroll, font=ctk.CTkFont(*FONTS["body"]), fg_color=COLORS["bg_input"], border_color=COLORS["border"], text_color=COLORS["text_primary"], height=28)
-                w_entry.insert(0, word_data["word"])
-                w_entry.grid(row=idx, column=1, padx=4, pady=4, sticky="ew")
+                current_line.append(word_data["word"])
                 
-                # Start entry
-                s_entry = ctk.CTkEntry(self.words_scroll, font=ctk.CTkFont(*FONTS["body"]), fg_color=COLORS["bg_input"], border_color=COLORS["border"], text_color=COLORS["text_primary"], height=28)
-                s_entry.insert(0, str(word_data["start"]))
-                s_entry.grid(row=idx, column=2, padx=4, pady=4, sticky="ew")
+                # Max 8 words per line or sentence end
+                is_sentence_end = word_data["word"].rstrip().endswith((".", "!", "?", "，", "。"))
+                if len(current_line) >= 8 or is_sentence_end:
+                    lines.append(" ".join(current_line))
+                    current_line = []
+            
+            if current_line:
+                lines.append(" ".join(current_line))
                 
-                # End entry
-                e_entry = ctk.CTkEntry(self.words_scroll, font=ctk.CTkFont(*FONTS["body"]), fg_color=COLORS["bg_input"], border_color=COLORS["border"], text_color=COLORS["text_primary"], height=28)
-                e_entry.insert(0, str(word_data["end"]))
-                e_entry.grid(row=idx, column=3, padx=4, pady=4, sticky="ew")
-                
-                # Bind key releases for validation
-                w_entry.bind("<KeyRelease>", lambda e: self._validate_inputs())
-                s_entry.bind("<KeyRelease>", lambda e: self._validate_inputs())
-                e_entry.bind("<KeyRelease>", lambda e: self._validate_inputs())
-                
-                self.word_rows.append({
-                    "word_widget": w_entry,
-                    "start_widget": s_entry,
-                    "end_widget": e_entry,
-                    "widgets": [idx_lbl, w_entry, s_entry, e_entry]
-                })
-                
-            self.log_panel.log(f"JSON dosyasından {len(self.word_rows)} kelime yüklendi.", "success")
+            lyrics_text = "\n".join(lines)
+            
+            # Enable textbox, clear and insert
+            self.lyrics_textbox.configure(state="normal")
+            self.lyrics_textbox.delete("1.0", "end")
+            self.lyrics_textbox.insert("end", lyrics_text)
+            
+            self._update_word_counts()
+            
+            self.log_panel.log(f"JSON dosyasından {len(self.original_words)} kelime yüklendi.", "success")
             
             # Smart auto-detection of audio file and output directory
             json_dir = os.path.dirname(json_path)
@@ -577,6 +552,26 @@ class KaraokeApp(ctk.CTk):
                         
         except Exception as e:
             messagebox.showerror("Yükleme Hatası", f"JSON dosyası okunamadı veya biçimi geçersiz:\n{e}")
+
+    def _update_word_counts(self, event=None):
+        if not hasattr(self, "original_words") or not self.original_words:
+            self.words_count_label.configure(text="Kelime Sayısı: -", text_color=COLORS["text_muted"])
+            return
+            
+        orig_count = len(self.original_words)
+        lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
+        edited_words = lyrics_text.split()
+        edited_count = len(edited_words)
+        
+        text = f"Kelime Sayısı — Orijinal: {orig_count} | Düzenlenen: {edited_count}"
+        if orig_count == edited_count:
+            color = COLORS["success"]
+            text += " (Zamanlamalar 1:1 eşleşiyor ✓)"
+        else:
+            color = COLORS["warning"]
+            text += " (Farklı kelime sayısı: Zamanlamalar orantılı dağıtılacaktır ⚠)"
+            
+        self.words_count_label.configure(text=text, text_color=color)
 
     def _on_tab_changed(self):
         active_tab = self.tabview.get()
@@ -607,6 +602,7 @@ class KaraokeApp(ctk.CTk):
             json_path = self.manual_json_entry.get().strip()
             audio_path = self.manual_audio_entry.get().strip()
             output_dir = self.manual_output_entry.get().strip()
+            lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
             
             is_valid = True
             
@@ -617,18 +613,9 @@ class KaraokeApp(ctk.CTk):
                 is_valid = False
             if not (output_dir and os.path.isdir(output_dir)):
                 is_valid = False
-            if not self.word_rows:
+            if not lyrics_text or lyrics_text.startswith("Kelime zamanlama JSON"):
                 is_valid = False
                 
-            # Verify times in word rows
-            if is_valid:
-                try:
-                    for row in self.word_rows:
-                        float(row["start_widget"].get())
-                        float(row["end_widget"].get())
-                except ValueError:
-                    is_valid = False
-                    
             if is_valid:
                 self.start_btn.configure(state="normal")
                 self._set_status("Hazır — Yeniden oluşturmak için tıklayın ✓")
@@ -640,10 +627,8 @@ class KaraokeApp(ctk.CTk):
                     self._set_status("Altyapı ses dosyasını seçin")
                 elif not output_dir or not os.path.isdir(output_dir):
                     self._set_status("Geçerli bir çıktı klasörü girin")
-                elif not self.word_rows:
-                    self._set_status("Kelime listesi yüklenemedi")
-                else:
-                    self._set_status("Lütfen kelime zamanlarındaki sayı formatlarını düzeltin")
+                elif not lyrics_text or lyrics_text.startswith("Kelime zamanlama JSON"):
+                    self._set_status("Şarkı sözleri yüklenemedi")
 
     def _set_status(self, text: str):
         self.status_label.configure(text=text)
@@ -715,34 +700,41 @@ class KaraokeApp(ctk.CTk):
         json_path = self.manual_json_entry.get().strip()
         audio_path = self.manual_audio_entry.get().strip()
         output_dir = self.manual_output_entry.get().strip()
+        lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
         
-        if not json_path or not audio_path or not output_dir:
+        if not json_path or not audio_path or not output_dir or not lyrics_text:
             return
             
-        # Parse words from editor rows
+        # Parse edited words
+        edited_words_list = lyrics_text.split()
+        if not edited_words_list:
+            messagebox.showerror("Hata", "Şarkı sözleri boş olamaz.")
+            return
+
+        # Align with original timings
         words = []
-        try:
-            for row in self.word_rows:
-                word_text = row["word_widget"].get().strip()
-                start_val = float(row["start_widget"].get())
-                end_val = float(row["end_widget"].get())
-                
-                if not word_text:
-                    continue
-                    
+        n_orig = len(self.original_words)
+        n_edit = len(edited_words_list)
+        
+        if n_orig == n_edit:
+            for ew, ow in zip(edited_words_list, self.original_words):
                 words.append({
-                    "word": word_text,
-                    "start": start_val,
-                    "end": end_val,
+                    "word": ew,
+                    "start": ow["start"],
+                    "end": ow["end"],
                     "score": 1.0
                 })
-        except ValueError:
-            messagebox.showerror("Hata", "Lütfen kelime zamanlarındaki sayı formatlarını kontrol edin.")
-            return
-            
-        if not words:
-            messagebox.showerror("Hata", "Düzenlenecek kelime bulunamadı.")
-            return
+        else:
+            # Proportional mapping (keeps silence gaps intact due to sequence matching)
+            for i, ew in enumerate(edited_words_list):
+                orig_idx = min(int(i * n_orig / n_edit), n_orig - 1)
+                ow = self.original_words[orig_idx]
+                words.append({
+                    "word": ew,
+                    "start": ow["start"],
+                    "end": ow["end"],
+                    "score": 1.0
+                })
 
         # UI hazırlık
         self.start_btn.configure(state="disabled")
