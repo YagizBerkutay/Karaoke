@@ -1,0 +1,22 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Project outputs and temp files
+*.mp4
+*.wav
+*.ass
+*.lrc
+temp_*
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,26 @@
+# ============================================================
+# requirements.txt — Karaoke Uygulması
+# ============================================================
+
+# ── GUI ──────────────────────────────────────────────────────
+customtkinter>=5.2.0
+Pillow>=10.0.0
+tkinterdnd2>=0.3.0
+
+# ── Ses Ayrıştırma (Demucs - Meta AI) ────────────────────────
+demucs>=4.0.0
+
+# ── Transkripsiyon (faster-whisper) ──────────────────────────
+faster-whisper>=1.0.0
+
+# ── PyTorch (CPU versiyonu — kurulum sırasında CUDA ile değiştirilir) ─
+# torch ve torchaudio setup.bat tarafından CUDA/CPU'ya göre ayrı kurulur
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# ── Ses İşleme ───────────────────────────────────────────────
+pydub>=0.25.1
+numpy>=1.24.0
+
+# ── Diğer ───────────────────────────────────────────────────
+requests>=2.28.0
