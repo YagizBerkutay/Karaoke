@@ -357,17 +357,9 @@ class KaraokeApp(ctk.CTk):
         self.lyrics_textbox.configure(state="disabled")
         self.original_words = []
 
-        # ── Tab 2 Altı: Manuel Progress & Log Paneli ──
-        manual_bottom = ctk.CTkFrame(tab_manual, fg_color="transparent")
-        manual_bottom.grid(row=2, column=0, sticky="ew", pady=(SIZES["padding_md"], 0))
-        manual_bottom.grid_columnconfigure(0, weight=1)
-        manual_bottom.grid_columnconfigure(1, weight=1)
-
-        self.manual_step_progress = StepProgressBar(manual_bottom)
-        self.manual_step_progress.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-
-        self.manual_log_panel = LogPanel(manual_bottom, height=180)
-        self.manual_log_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        # ── Tab 2 Altı: Sadece Manuel Log Paneli (Yer kazanmak için Progress Bar kaldırıldı) ──
+        self.manual_log_panel = LogPanel(tab_manual, height=130)
+        self.manual_log_panel.grid(row=2, column=0, sticky="ew", pady=(SIZES["padding_md"], 0))
 
         # GPU hint update (async)
         threading.Thread(target=self._update_gpu_hint, daemon=True).start()
@@ -739,12 +731,6 @@ class KaraokeApp(ctk.CTk):
         # UI hazırlık
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.manual_step_progress.reset_all()
-        
-        # Mark step 0 & 1 as done (skipped)
-        self.manual_step_progress.set_step_state(0, "done")
-        self.manual_step_progress.set_step_state(1, "done")
-        
         self.manual_log_panel.clear()
         self._is_processing = True
 
@@ -776,9 +762,9 @@ class KaraokeApp(ctk.CTk):
         )
         
         # Pipeline callbacks setup
-        self.pipeline.on_step_start = self._manual_step_start
-        self.pipeline.on_step_progress = self._manual_step_progress
-        self.pipeline.on_step_done = self._manual_step_done
+        self.pipeline.on_step_start = self._step_start
+        self.pipeline.on_step_progress = self._step_progress
+        self.pipeline.on_step_done = self._step_done
 
         # Arkaplanda işle
         self._processing_thread = threading.Thread(
@@ -851,19 +837,6 @@ class KaraokeApp(ctk.CTk):
     def _step_done(self, index: int):
         self.after(0, lambda: self.step_progress.set_step_state(index, "done"))
 
-    def _manual_step_start(self, index: int, name: str = ""):
-        self.after(0, lambda: self.manual_step_progress.set_step_state(index, "running"))
-        step_name = name if name else StepProgressBar.STEPS[index][1]
-        self.after(0, lambda: self._set_status(
-            f"Adım {index + 1}/4: {step_name}..."
-        ))
-
-    def _manual_step_progress(self, index: int, value: float):
-        self.after(0, lambda: self.manual_step_progress.update_progress(index, value))
-
-    def _manual_step_done(self, index: int):
-        self.after(0, lambda: self.manual_step_progress.set_step_state(index, "done"))
-
     def _on_complete(self, output_path: str, lrc_path: str):
         self._is_processing = False
         self.start_btn.configure(state="normal")
@@ -896,7 +869,7 @@ class KaraokeApp(ctk.CTk):
         self.cancel_btn.configure(state="disabled")
 
         active_tab = self.tabview.get()
-        prog = self.step_progress if active_tab == "Otomatik Oluştur" else self.manual_step_progress
+        prog = self.step_progress # Tab 1'deki ana ilerleme barını güncelliyoruz
         logp = self.log_panel if active_tab == "Otomatik Oluştur" else self.manual_log_panel
 
         for i in range(4):
