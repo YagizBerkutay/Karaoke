@@ -21,6 +21,8 @@ class KaraokeApp(ctk.CTk):
         super().__init__()
         self._configure_window()
         self._setup_ctk()
+        self.original_words = []
+        self.lyrics_text = ""
         self._build_ui()
         self._processing_thread = None
         self._is_processing = False
@@ -305,7 +307,8 @@ class KaraokeApp(ctk.CTk):
 
         # ── Tab 2: Manual Word Editor ──
         tab_manual.grid_columnconfigure(0, weight=1)
-        tab_manual.grid_rowconfigure(1, weight=1) # The editable table expands
+        tab_manual.grid_rowconfigure(1, weight=0) # Button frame does not need to expand
+        tab_manual.grid_rowconfigure(2, weight=1) # Log panel expands to fill the space
 
         # Manual File Inputs Frame
         manual_inputs = ctk.CTkFrame(tab_manual, fg_color=COLORS["bg_secondary"], corner_radius=SIZES["corner_radius"])
@@ -335,31 +338,31 @@ class KaraokeApp(ctk.CTk):
 
         # Word Editor Frame
         editor_frame = ctk.CTkFrame(tab_manual, fg_color=COLORS["bg_secondary"], corner_radius=SIZES["corner_radius"])
-        editor_frame.grid(row=1, column=0, sticky="nsew")
+        editor_frame.grid(row=1, column=0, sticky="ew", pady=(0, SIZES["padding_md"]))
         editor_frame.grid_columnconfigure(0, weight=1)
-        editor_frame.grid_rowconfigure(1, weight=1)
         
-        # Title/Description Label
-        ctk.CTkLabel(editor_frame, text="Şarkı Sözleri (Düzenlenebilir — Typos ve imla hatalarını buradan düzeltebilirsiniz):", font=ctk.CTkFont(*FONTS["body_bold"]), text_color=COLORS["text_secondary"]).grid(row=0, column=0, padx=SIZES["padding_md"], pady=(8, 4), sticky="w")
-        
-        # Lyrics Textbox
-        self.lyrics_textbox = ctk.CTkTextbox(editor_frame, font=ctk.CTkFont(*FONTS["body"]), fg_color=COLORS["bg_input"], border_color=COLORS["border"], border_width=1, text_color=COLORS["text_primary"], wrap="word")
-        self.lyrics_textbox.grid(row=1, column=0, sticky="nsew", padx=SIZES["padding_md"], pady=(0, 4))
-        self.lyrics_textbox.bind("<KeyRelease>", self._update_word_counts)
-        self.lyrics_textbox.bind("<KeyRelease>", lambda e: self._validate_inputs(), add="+")
+        # Button/Card to trigger Full Screen Lyrics Editor
+        self.edit_lyrics_btn = ctk.CTkButton(
+            editor_frame,
+            text="📝 Şarkı Sözlerini Düzenle (Tam Ekran)",
+            font=ctk.CTkFont("Segoe UI", 13, "bold"),
+            fg_color=COLORS["bg_tertiary"],
+            hover_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            height=50,
+            corner_radius=SIZES["corner_radius"],
+            command=self._open_lyrics_editor
+        )
+        self.edit_lyrics_btn.grid(row=0, column=0, sticky="ew", padx=SIZES["padding_md"], pady=(SIZES["padding_md"], 8))
+        self.edit_lyrics_btn.configure(state="disabled") # Disable until JSON is loaded
         
         # Word counts status label
         self.words_count_label = ctk.CTkLabel(editor_frame, text="Kelime Sayısı: -", font=ctk.CTkFont(*FONTS["small"]), text_color=COLORS["text_muted"])
-        self.words_count_label.grid(row=2, column=0, padx=SIZES["padding_md"], pady=(0, 6), sticky="w")
-        
-        # Start state
-        self.lyrics_textbox.insert("end", "Kelime zamanlama JSON dosyasını yüklediğinizde şarkı sözleri burada görünecektir.")
-        self.lyrics_textbox.configure(state="disabled")
-        self.original_words = []
+        self.words_count_label.grid(row=1, column=0, padx=SIZES["padding_md"], pady=(0, SIZES["padding_md"]), sticky="w")
 
         # ── Tab 2 Altı: Sadece Manuel Log Paneli (Yer kazanmak için Progress Bar kaldırıldı) ──
-        self.manual_log_panel = LogPanel(tab_manual, height=130)
-        self.manual_log_panel.grid(row=2, column=0, sticky="ew", pady=(SIZES["padding_md"], 0))
+        self.manual_log_panel = LogPanel(tab_manual, height=180)
+        self.manual_log_panel.grid(row=2, column=0, sticky="nsew", pady=(0, 0))
 
         # GPU hint update (async)
         threading.Thread(target=self._update_gpu_hint, daemon=True).start()
@@ -509,10 +512,9 @@ class KaraokeApp(ctk.CTk):
                 
             lyrics_text = "\n".join(lines)
             
-            # Enable textbox, clear and insert
-            self.lyrics_textbox.configure(state="normal")
-            self.lyrics_textbox.delete("1.0", "end")
-            self.lyrics_textbox.insert("end", lyrics_text)
+            # Store in self.lyrics_text and enable the edit button
+            self.lyrics_text = lyrics_text
+            self.edit_lyrics_btn.configure(state="normal")
             
             self._update_word_counts()
             
@@ -551,7 +553,7 @@ class KaraokeApp(ctk.CTk):
             return
             
         orig_count = len(self.original_words)
-        lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
+        lyrics_text = self.lyrics_text.strip()
         edited_words = lyrics_text.split()
         edited_count = len(edited_words)
         
@@ -594,7 +596,7 @@ class KaraokeApp(ctk.CTk):
             json_path = self.manual_json_entry.get().strip()
             audio_path = self.manual_audio_entry.get().strip()
             output_dir = self.manual_output_entry.get().strip()
-            lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
+            lyrics_text = self.lyrics_text.strip()
             
             is_valid = True
             
@@ -605,7 +607,7 @@ class KaraokeApp(ctk.CTk):
                 is_valid = False
             if not (output_dir and os.path.isdir(output_dir)):
                 is_valid = False
-            if not lyrics_text or lyrics_text.startswith("Kelime zamanlama JSON"):
+            if not lyrics_text:
                 is_valid = False
                 
             if is_valid:
@@ -619,7 +621,7 @@ class KaraokeApp(ctk.CTk):
                     self._set_status("Altyapı ses dosyasını seçin")
                 elif not output_dir or not os.path.isdir(output_dir):
                     self._set_status("Geçerli bir çıktı klasörü girin")
-                elif not lyrics_text or lyrics_text.startswith("Kelime zamanlama JSON"):
+                elif not lyrics_text:
                     self._set_status("Şarkı sözleri yüklenemedi")
 
     def _set_status(self, text: str):
@@ -692,7 +694,7 @@ class KaraokeApp(ctk.CTk):
         json_path = self.manual_json_entry.get().strip()
         audio_path = self.manual_audio_entry.get().strip()
         output_dir = self.manual_output_entry.get().strip()
-        lyrics_text = self.lyrics_textbox.get("1.0", "end").strip()
+        lyrics_text = self.lyrics_text.strip()
         
         if not json_path or not audio_path or not output_dir or not lyrics_text:
             return
@@ -881,3 +883,139 @@ class KaraokeApp(ctk.CTk):
         self._set_status(f"❌ Hata: {error[:60]}...")
 
         messagebox.showerror("Hata Oluştu", f"İşlem sırasında hata:\n\n{error}")
+
+    def _open_lyrics_editor(self):
+        # Open a new CTkToplevel window
+        editor_win = ctk.CTkToplevel(self)
+        editor_win.title("Şarkı Sözü Düzenleyici (Tam Ekran)")
+        
+        # Try to maximize the window (Windows zoomed state)
+        try:
+            editor_win.state("zoomed")
+        except Exception:
+            # Fallback to large geometry if zoomed state is not supported
+            win_w = 1000
+            win_h = 750
+            screen_w = editor_win.winfo_screenwidth()
+            screen_h = editor_win.winfo_screenheight()
+            pos_x = (screen_w - win_w) // 2
+            pos_y = (screen_h - win_h) // 2
+            editor_win.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+            
+        editor_win.configure(fg_color=COLORS["bg_primary"])
+        
+        # Make it modal & transient
+        editor_win.transient(self)
+        editor_win.grab_set()
+        
+        # Layout
+        editor_win.grid_columnconfigure(0, weight=1)
+        editor_win.grid_rowconfigure(1, weight=1) # Textbox gets all vertical space
+        
+        # Header
+        header_frame = ctk.CTkFrame(editor_win, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=SIZES["padding_lg"], pady=(SIZES["padding_lg"], 8))
+        header_frame.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(
+            header_frame, 
+            text="📝  Şarkı Sözleri Düzenleme Paneli", 
+            font=ctk.CTkFont("Segoe UI", 20, "bold"), 
+            text_color=COLORS["accent_glow"]
+        ).grid(row=0, column=0, sticky="w")
+        
+        ctk.CTkLabel(
+            header_frame, 
+            text="İmla ve kelime hatalarını buradan düzenleyebilirsiniz. Kelime sayısının orijinal sayı ile aynı kalması, kelime-zamanlama eşleştirmesinin 1:1 doğru olması için önerilir.", 
+            font=ctk.CTkFont(*FONTS["body"]), 
+            text_color=COLORS["text_secondary"]
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        
+        # Textbox Frame (adds padding and background)
+        tb_frame = ctk.CTkFrame(editor_win, fg_color=COLORS["bg_secondary"], corner_radius=SIZES["corner_radius"])
+        tb_frame.grid(row=1, column=0, sticky="nsew", padx=SIZES["padding_lg"], pady=8)
+        tb_frame.grid_columnconfigure(0, weight=1)
+        tb_frame.grid_rowconfigure(0, weight=1)
+        
+        tb = ctk.CTkTextbox(
+            tb_frame, 
+            font=ctk.CTkFont("Consolas", 14), 
+            fg_color=COLORS["bg_input"], 
+            border_color=COLORS["border"], 
+            border_width=1, 
+            text_color=COLORS["text_primary"], 
+            wrap="word"
+        )
+        tb.grid(row=0, column=0, sticky="nsew", padx=SIZES["padding_md"], pady=SIZES["padding_md"])
+        
+        # Insert current text
+        tb.insert("1.0", self.lyrics_text)
+        tb.focus_set()
+        
+        # Word count label inside editor window for real-time feedback
+        count_lbl = ctk.CTkLabel(
+            editor_win, 
+            text="", 
+            font=ctk.CTkFont("Segoe UI", 12, "bold")
+        )
+        count_lbl.grid(row=2, column=0, sticky="w", padx=SIZES["padding_lg"], pady=6)
+        
+        def update_editor_counts(event=None):
+            orig_count = len(self.original_words)
+            current_text = tb.get("1.0", "end").strip()
+            edited_words = current_text.split()
+            edited_count = len(edited_words)
+            
+            lbl_text = f"Kelime Sayısı — Orijinal: {orig_count} | Düzenlenen: {edited_count}"
+            if orig_count == edited_count:
+                color = COLORS["success"]
+                lbl_text += " (Zamanlamalar 1:1 eşleşiyor ✓)"
+            else:
+                color = COLORS["warning"]
+                lbl_text += " (Farklı kelime sayısı: Zamanlamalar orantılı dağıtılacaktır ⚠)"
+            count_lbl.configure(text=lbl_text, text_color=color)
+            
+        tb.bind("<KeyRelease>", update_editor_counts)
+        update_editor_counts() # initial run
+        
+        # Footer
+        footer_frame = ctk.CTkFrame(editor_win, fg_color="transparent")
+        footer_frame.grid(row=3, column=0, sticky="ew", padx=SIZES["padding_lg"], pady=SIZES["padding_lg"])
+        footer_frame.grid_columnconfigure(0, weight=1)
+        
+        def save_and_close():
+            self.lyrics_text = tb.get("1.0", "end").strip()
+            self._update_word_counts()
+            self._validate_inputs()
+            editor_win.destroy()
+            
+        # Cancel Button
+        cancel_btn = ctk.CTkButton(
+            footer_frame, 
+            text="Vazgeç", 
+            width=120, 
+            height=44,
+            fg_color=COLORS["bg_tertiary"], 
+            hover_color=COLORS["error"], 
+            text_color=COLORS["text_secondary"],
+            font=ctk.CTkFont(*FONTS["body_bold"]),
+            command=editor_win.destroy
+        )
+        cancel_btn.grid(row=0, column=1, padx=(0, 12))
+        
+        # Save Button
+        save_btn = ctk.CTkButton(
+            footer_frame, 
+            text="💾  Değişiklikleri Uygula", 
+            width=220, 
+            height=44,
+            fg_color=COLORS["accent_secondary"], 
+            hover_color=COLORS["accent_primary"], 
+            text_color=COLORS["text_primary"],
+            font=ctk.CTkFont("Segoe UI", 13, "bold"),
+            command=save_and_close
+        )
+        save_btn.grid(row=0, column=2)
+        
+        # Force focus after a short delay
+        editor_win.after(100, lambda: editor_win.focus_force())
