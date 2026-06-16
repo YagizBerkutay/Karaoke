@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 
-class AudioSeparator:
+from src.engine.interfaces import IAudioSeparator
+
+
+class AudioSeparator(IAudioSeparator):
     """
     Demucs htdemucs modeli ile ses ayrıştırma.
     

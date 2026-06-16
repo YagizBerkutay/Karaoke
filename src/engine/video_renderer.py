@@ -12,7 +12,10 @@ import re
 from typing import Callable, Optional
 
 
-class VideoRenderer:
+from src.engine.interfaces import IVideoRenderer
+
+
+class VideoRenderer(IVideoRenderer):
     """
     FFmpeg tabanlı video render motoru.
     
@@ -47,6 +50,7 @@ class VideoRenderer:
         audio_path: str,
         subtitle_path: str,
         output_path: str,
+        check_cancelled: Optional[Callable[[], None]] = None,
     ) -> str:
         """
         Karaoke videosunu render eder.
@@ -55,6 +59,7 @@ class VideoRenderer:
             audio_path:    accompaniment.wav yolu
             subtitle_path: karaoke.ass yolu
             output_path:   çıktı .mp4 yolu
+            check_cancelled: İptal durumunu kontrol eden callback
             
         Returns:
             Oluşturulan video dosyası yolu
@@ -101,7 +106,7 @@ class VideoRenderer:
             self.on_progress(0.1)
 
             # FFmpeg'i çalıştır ve ilerlemeyi takip et
-            self._run_ffmpeg(cmd, duration)
+            self._run_ffmpeg(cmd, duration, check_cancelled)
         finally:
             # Clean up the local temporary subtitle file
             if os.path.exists(temp_ass_name):
@@ -120,7 +125,17 @@ class VideoRenderer:
 
         return output_path
 
-    def _run_ffmpeg(self, cmd: list, total_duration: float):
+    def render_with_cancel(
+        self,
+        audio_path: str,
+        subtitle_path: str,
+        output_path: str,
+        check_cancelled: Optional[Callable[[], None]] = None,
+    ) -> str:
+        """Pipeline tarafından iptal kontrolüyle çağrılan render fonksiyonu."""
+        return self.render(audio_path, subtitle_path, output_path, check_cancelled)
+
+    def _run_ffmpeg(self, cmd: list, total_duration: float, check_cancelled: Optional[Callable[[], None]] = None):
         """FFmpeg process'i çalıştırır ve ilerlemeyi takip eder."""
         process = subprocess.Popen(
             cmd,
@@ -144,29 +159,41 @@ class VideoRenderer:
 
         # Stdout'tan ilerlemeyi oku
         current_time = 0.0
-        for line in process.stdout:
-            line = line.strip()
+        try:
+            for line in process.stdout:
+                # İptal kontrolü
+                if check_cancelled:
+                    try:
+                        check_cancelled()
+                    except Exception as ce:
+                        process.kill()
+                        raise ce
+                
+                line = line.strip()
 
-            if line.startswith("out_time_ms="):
-                try:
-                    ms = int(line.split("=")[1])
-                    current_time = ms / 1_000_000
-                    if total_duration > 0:
-                        progress = min(0.1 + (current_time / total_duration) * 0.88, 0.98)
-                        self.on_progress(progress)
+                if line.startswith("out_time_ms="):
+                    try:
+                        ms = int(line.split("=")[1])
+                        current_time = ms / 1_000_000
+                        if total_duration > 0:
+                            progress = min(0.1 + (current_time / total_duration) * 0.88, 0.98)
+                            self.on_progress(progress)
 
-                        # Her 30 saniyede bir log
-                        if int(current_time) % 30 == 0 and current_time > 0:
-                            pct = (current_time / total_duration) * 100
-                            self._log(
-                                f"Render: {current_time:.0f}s / {total_duration:.0f}s ({pct:.0f}%)",
-                                "info"
-                            )
-                except ValueError:
-                    pass
-
-        process.wait()
-        stderr_thread.join(timeout=2)
+                            # Her 30 saniyede bir log
+                            if int(current_time) % 30 == 0 and current_time > 0:
+                                pct = (current_time / total_duration) * 100
+                                self._log(
+                                    f"Render: {current_time:.0f}s / {total_duration:.0f}s ({pct:.0f}%)",
+                                    "info"
+                                )
+                    except ValueError:
+                        pass
+        except Exception as e:
+            process.kill()
+            raise e
+        finally:
+            process.wait()
+            stderr_thread.join(timeout=2)
 
         if process.returncode != 0:
             error_msg = "\n".join(stderr_lines[-20:])  # Son 20 satır

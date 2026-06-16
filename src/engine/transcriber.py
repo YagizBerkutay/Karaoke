@@ -8,7 +8,10 @@ import os
 from typing import Callable, Optional, List, Dict, Any
 
 
-class Transcriber:
+from src.engine.interfaces import ITranscriber
+
+
+class Transcriber(ITranscriber):
     """
     faster-whisper ile kelime düzeyinde transkripsiyon.
     

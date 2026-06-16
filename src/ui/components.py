@@ -380,9 +380,6 @@ class FileDropZone(ctk.CTkFrame):
             widget.bind("<Leave>", lambda e: self._on_hover(False))
             widget.bind("<Button-1>", lambda e: self._browse_file())
 
-        self.browse_btn.bind("<Enter>", lambda e: None)
-        self.browse_btn.bind("<Leave>", lambda e: None)
-        self.browse_btn.bind("<Button-1>", lambda e: self._browse_file())
 
     def _setup_drag_drop(self):
         """tkinterdnd2 ile sürükle-bırak desteği."""

@@ -10,7 +10,10 @@ from typing import Callable, List, Dict, Any, Optional
 
 # ─── ASS Karaoke Altyazı Üreteci ─────────────────────────────────────────────
 
-class SubtitleGenerator:
+from src.engine.interfaces import ISubtitleGenerator
+
+
+class SubtitleGenerator(ISubtitleGenerator):
     """
     .ass (Advanced SubStation Alpha) karaoke altyazı üreteci.
     

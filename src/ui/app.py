@@ -24,6 +24,8 @@ class KaraokeApp(ctk.CTk):
         self._build_ui()
         self._processing_thread = None
         self._is_processing = False
+        self.pipeline = None
+        self._bind_keys()
 
     # ─── Pencere Yapılandırması ───────────────────────────────────────────────
 
@@ -41,6 +43,14 @@ class KaraokeApp(ctk.CTk):
     def _setup_ctk(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
+
+    def _bind_keys(self):
+        self.bind("<Return>", lambda e: self._on_enter_pressed())
+        self.bind("<Escape>", lambda e: self._cancel_processing())
+
+    def _on_enter_pressed(self):
+        if self.start_btn.cget("state") == "normal":
+            self._start_processing()
 
     # ─── UI İnşası ────────────────────────────────────────────────────────────
 
@@ -115,6 +125,13 @@ class KaraokeApp(ctk.CTk):
                                        scrollbar_button_color=COLORS["bg_tertiary"])
         main.grid(row=1, column=0, sticky="nsew")
         main.grid_columnconfigure(0, weight=1)
+
+        # HCI: Windows'ta CTkScrollableFrame'in yavaş kayma sorununu düzelt
+        original_mouse_wheel = main._mouse_wheel_all
+        def new_mouse_wheel(event):
+            event.delta = event.delta * 3
+            original_mouse_wheel(event)
+        main._mouse_wheel_all = new_mouse_wheel
 
         row = 0
 
@@ -236,6 +253,7 @@ class KaraokeApp(ctk.CTk):
                                           text_color=COLORS["text_primary"],
                                           height=40)
         self.output_entry.grid(row=0, column=0, sticky="ew")
+        self.output_entry.bind("<KeyRelease>", lambda e: self._validate_inputs())
 
         ctk.CTkButton(out_inner, text="📁", width=44, height=40,
                       fg_color=COLORS["bg_tertiary"],
@@ -327,16 +345,30 @@ class KaraokeApp(ctk.CTk):
         self.output_entry.delete(0, "end")
         self.output_entry.insert(0, output_dir)
 
-        self.start_btn.configure(state="normal")
         self.log_panel.log(f"Dosya yüklendi: {os.path.basename(path)}", "success")
         self.log_panel.log(f"Klasör: {output_dir}", "info")
-        self._set_status("Hazır — Başlatmak için butona tıklayın ✓")
+        self._validate_inputs()
 
     def _browse_output(self):
         path = filedialog.askdirectory(title="Çıktı Klasörü Seç")
         if path:
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, path)
+            self._validate_inputs()
+
+    def _validate_inputs(self):
+        mp3_path = self.file_zone.get_file()
+        output_dir = self.output_entry.get().strip()
+        
+        if mp3_path and output_dir and os.path.isdir(output_dir):
+            self.start_btn.configure(state="normal")
+            self._set_status("Hazır — Başlatmak için butona tıklayın ✓")
+        else:
+            self.start_btn.configure(state="disabled")
+            if not mp3_path:
+                self._set_status("Dosya seçin ve başlatın")
+            else:
+                self._set_status("Geçerli bir çıktı klasörü girin")
 
     def _set_status(self, text: str):
         self.status_label.configure(text=text)
@@ -349,11 +381,7 @@ class KaraokeApp(ctk.CTk):
         model = self.model_selector.get()
         language = self.lang_var.get()
 
-        if not mp3_path:
-            messagebox.showerror("Hata", "Lütfen bir MP3 dosyası seçin!")
-            return
-        if not output_dir or not os.path.isdir(output_dir):
-            messagebox.showerror("Hata", "Geçerli bir çıktı klasörü seçin!")
+        if not mp3_path or not output_dir or not os.path.isdir(output_dir):
             return
 
         # UI hazırlık
@@ -368,112 +396,64 @@ class KaraokeApp(ctk.CTk):
         self.log_panel.log(f"Model: {model.upper()} | Dil: {language}", "info")
         self.log_panel.log("═══════════════════════════════════", "info")
 
+        # Dependency Injection (SOLID)
+        from src.engine.audio_separator import AudioSeparator
+        from src.engine.transcriber import Transcriber
+        from src.engine.subtitle_gen import SubtitleGenerator
+        from src.engine.video_renderer import VideoRenderer
+        from src.engine.pipeline import KaraokePipeline
+
+        separator = AudioSeparator()
+        transcriber = Transcriber(model_size=model, language=language if language != "auto" else None)
+        sub_gen = SubtitleGenerator()
+        renderer = VideoRenderer()
+
+        self.pipeline = KaraokePipeline(
+            separator=separator,
+            transcriber=transcriber,
+            sub_gen=sub_gen,
+            renderer=renderer,
+            on_log=self.log_panel.log
+        )
+        
+        # Pipeline callbacks setup
+        self.pipeline.on_step_start = self._step_start
+        self.pipeline.on_step_progress = self._step_progress
+        self.pipeline.on_step_done = self._step_done
+
         # Arkaplanda işle
         self._processing_thread = threading.Thread(
             target=self._run_pipeline,
-            args=(mp3_path, output_dir, model, language),
+            args=(mp3_path, output_dir),
             daemon=True
         )
         self._processing_thread.start()
 
     def _cancel_processing(self):
+        if self.pipeline:
+            self.pipeline.cancel()
         self._is_processing = False
         self.log_panel.log("İşlem iptal ediliyor...", "warning")
         self._set_status("İptal edildi")
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
 
-    def _run_pipeline(self, mp3_path: str, output_dir: str,
-                       model: str, language: str):
+    def _run_pipeline(self, mp3_path: str, output_dir: str):
         """Tüm işlem pipeline'ını çalıştırır (arkaplan thread'i)."""
-        from src.engine.audio_separator import AudioSeparator
-        from src.engine.transcriber import Transcriber
-        from src.engine.subtitle_gen import SubtitleGenerator
-        from src.engine.video_renderer import VideoRenderer
-        from src.utils.temp_manager import TempManager
         import traceback
 
-        temp = TempManager()
-
         try:
-            # ── Adım 1: Ses Ayrıştırma ──────────────────────────────────────
-            self._step_start(0)
-            self.log_panel.log("Demucs modeli yükleniyor...", "info")
-
-            separator = AudioSeparator(
-                on_progress=lambda p: self._step_progress(0, p),
-                on_log=self.log_panel.log
-            )
-            vocals_path, accomp_path = separator.separate(mp3_path, temp.dir)
-
+            results = self.pipeline.run(mp3_path, output_dir)
             if not self._is_processing:
                 return
-            self._step_done(0)
-            self.log_panel.log(
-                f"Ayrıştırma tamamlandı: vocals.wav + accompaniment.wav", "success"
-            )
-
-            # ── Adım 2: Transkripsiyon ───────────────────────────────────────
-            self._step_start(1)
-            self.log_panel.log(f"Whisper {model} modeli yükleniyor...", "info")
-
-            transcriber = Transcriber(
-                model_size=model,
-                language=language if language != "auto" else None,
-                on_progress=lambda p: self._step_progress(1, p),
-                on_log=self.log_panel.log
-            )
-            words = transcriber.transcribe(vocals_path)
-
-            if not words:
-                raise ValueError("Söz tespit edilemedi. Farklı bir model deneyin.")
-
-            if not self._is_processing:
-                return
-            self._step_done(1)
-            self.log_panel.log(f"{len(words)} kelime tespit edildi.", "success")
-
-            # ── Adım 3: Altyazı Üretme ───────────────────────────────────────
-            self._step_start(2)
-            ass_path = temp.path("karaoke.ass")
-
-            sub_gen = SubtitleGenerator(on_log=self.log_panel.log)
-            sub_gen.generate(words, ass_path)
-
-            # .lrc dosyası da üret
-            lrc_path = os.path.join(output_dir,
-                                    Path(mp3_path).stem + ".lrc")
-            sub_gen.generate_lrc(words, lrc_path)
-
-            if not self._is_processing:
-                return
-            self._step_done(2)
-            self.log_panel.log("Altyazı oluşturuldu (.ass + .lrc)", "success")
-
-            # ── Adım 4: Video Render ─────────────────────────────────────────
-            self._step_start(3)
-            output_path = os.path.join(
-                output_dir, Path(mp3_path).stem + "_karaoke.mp4"
-            )
-
-            renderer = VideoRenderer(
-                on_progress=lambda p: self._step_progress(3, p),
-                on_log=self.log_panel.log
-            )
-            renderer.render(accomp_path, ass_path, output_path)
-
-            if not self._is_processing:
-                return
-            self._step_done(3)
-
-            # ── Tamamlandı ───────────────────────────────────────────────────
-            self.after(0, lambda: self._on_complete(output_path, lrc_path))
+            self.after(0, lambda: self._on_complete(results["video"], results["lrc"]))
 
         except Exception as e:
-            tb = traceback.format_exc()
-            self.after(0, lambda: self._on_error(str(e), tb))
-        finally:
-            temp.cleanup()
+            if "İşlem kullanıcı tarafından iptal edildi" in str(e):
+                self.after(0, lambda: self._set_status("İptal edildi"))
+            else:
+                tb = traceback.format_exc()
+                self.after(0, lambda: self._on_error(str(e), tb))
 
     def _step_start(self, index: int):
         self.after(0, lambda: self.step_progress.set_step_state(index, "running"))
