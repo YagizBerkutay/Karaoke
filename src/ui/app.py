@@ -803,6 +803,33 @@ class KaraokeApp(ctk.CTk):
                 except Exception:
                     pass
 
+    def _cancel_processing(self):
+        if self.pipeline:
+            self.pipeline.cancel()
+        self._is_processing = False
+        self.log_panel.log("İşlem iptal ediliyor...", "warning")
+        self._set_status("İptal edildi")
+        self.start_btn.configure(state="normal")
+        self.cancel_btn.configure(state="disabled")
+
+    def _run_pipeline(self, mp3_path: str, output_dir: str):
+        """Tüm işlem pipeline'ını çalıştırır (arkaplan thread'i)."""
+        import traceback
+
+        try:
+            results = self.pipeline.run(mp3_path, output_dir)
+            if not self._is_processing:
+                return
+            self.after(0, lambda: self._on_complete(results["video"], results["lrc"]))
+
+        except Exception as e:
+            err_msg = str(e)
+            if "İşlem kullanıcı tarafından iptal edildi" in err_msg:
+                self.after(0, lambda: self._set_status("İptal edildi"))
+            else:
+                tb = traceback.format_exc()
+                self.after(0, lambda err=err_msg, t=tb: self._on_error(err, t))
+
     def _step_start(self, index: int, name: str = ""):
         self.after(0, lambda: self.step_progress.set_step_state(index, "running"))
         step_name = name if name else StepProgressBar.STEPS[index][1]
