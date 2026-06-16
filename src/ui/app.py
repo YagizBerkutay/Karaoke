@@ -55,9 +55,8 @@ class KaraokeApp(ctk.CTk):
     # ─── UI İnşası ────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # We now have 2 columns: left column (tabview) and right column (step progress & logs)
-        self.grid_columnconfigure(0, weight=3)
-        self.grid_columnconfigure(1, weight=2)
+        # Tek kolonlu, geniş ekran yapısını geri yükle
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
         self._build_header()
@@ -67,7 +66,7 @@ class KaraokeApp(ctk.CTk):
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=COLORS["bg_secondary"],
                                corner_radius=0, height=72)
-        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.grid(row=0, column=0, sticky="ew")
         header.grid_columnconfigure(1, weight=1)
         header.grid_propagate(False)
 
@@ -123,7 +122,7 @@ class KaraokeApp(ctk.CTk):
             text=text, text_color=color))
 
     def _build_main_content(self):
-        # ── Left Column: Tabview ──
+        # ── Tam Genişlikte Tabview ──
         self.tabview = ctk.CTkTabview(
             self,
             fg_color=COLORS["bg_primary"],
@@ -135,8 +134,8 @@ class KaraokeApp(ctk.CTk):
         self.tabview.grid(
             row=1, column=0,
             sticky="nsew",
-            padx=(SIZES["padding_lg"], SIZES["padding_md"]),
-            pady=SIZES["padding_md"]
+            padx=SIZES["padding_md"],
+            pady=(0, SIZES["padding_md"])
         )
         self.tabview.configure(command=self._on_tab_changed)
 
@@ -147,7 +146,7 @@ class KaraokeApp(ctk.CTk):
         tab_auto.grid_columnconfigure(0, weight=1)
         tab_auto.grid_rowconfigure(0, weight=1)
 
-        # Tab 1: Scrollable container for auto-gen inputs
+        # Tab 1: Scrollable container for auto-gen inputs and outputs
         main = ctk.CTkScrollableFrame(tab_auto, fg_color=COLORS["bg_primary"],
                                        scrollbar_button_color=COLORS["bg_tertiary"])
         main.grid(row=0, column=0, sticky="nsew")
@@ -288,6 +287,21 @@ class KaraokeApp(ctk.CTk):
                       font=ctk.CTkFont(size=16),
                       command=self._browse_output).grid(
             row=0, column=1, padx=(8, 0))
+        row += 1
+
+        # ── 5. İlerleme ve Log (Otomatik Oluştur Tabı İçin Alt Kısım) ──
+        bottom_frame = ctk.CTkFrame(main, fg_color="transparent")
+        bottom_frame.grid(row=row, column=0, sticky="ew",
+                           padx=SIZES["padding_lg"],
+                           pady=(0, SIZES["padding_xl"]))
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure(1, weight=1)
+
+        self.step_progress = StepProgressBar(bottom_frame)
+        self.step_progress.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        self.log_panel = LogPanel(bottom_frame, height=280)
+        self.log_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
         # ── Tab 2: Manual Word Editor ──
         tab_manual.grid_columnconfigure(0, weight=1)
@@ -359,17 +373,17 @@ class KaraokeApp(ctk.CTk):
         self.placeholder_label = ctk.CTkLabel(self.words_scroll, text="Kelime listesini yüklemek için yukarıdan JSON dosyası seçin.", font=ctk.CTkFont(*FONTS["body"]), text_color=COLORS["text_muted"])
         self.placeholder_label.grid(row=0, column=0, columnspan=4, pady=40, sticky="ew")
 
-        # ── Right Column: Step Progress & Log Panel ──
-        right_panel = ctk.CTkFrame(self, fg_color="transparent")
-        right_panel.grid(row=1, column=1, sticky="nsew", padx=(SIZES["padding_md"], SIZES["padding_lg"]), pady=(SIZES["padding_md"], SIZES["padding_lg"]))
-        right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(1, weight=1) # Log panel expands
-        
-        self.step_progress = StepProgressBar(right_panel)
-        self.step_progress.grid(row=0, column=0, sticky="ew", pady=(0, SIZES["padding_md"]))
-        
-        self.log_panel = LogPanel(right_panel)
-        self.log_panel.grid(row=1, column=0, sticky="nsew")
+        # ── Tab 2 Altı: Manuel Progress & Log Paneli ──
+        manual_bottom = ctk.CTkFrame(tab_manual, fg_color="transparent")
+        manual_bottom.grid(row=2, column=0, sticky="ew", pady=(SIZES["padding_md"], 0))
+        manual_bottom.grid_columnconfigure(0, weight=1)
+        manual_bottom.grid_columnconfigure(1, weight=1)
+
+        self.manual_step_progress = StepProgressBar(manual_bottom)
+        self.manual_step_progress.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        self.manual_log_panel = LogPanel(manual_bottom, height=180)
+        self.manual_log_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
         # GPU hint update (async)
         threading.Thread(target=self._update_gpu_hint, daemon=True).start()
@@ -395,7 +409,7 @@ class KaraokeApp(ctk.CTk):
     def _build_footer(self):
         footer = ctk.CTkFrame(self, fg_color=COLORS["bg_secondary"],
                                corner_radius=0, height=80)
-        footer.grid(row=2, column=0, columnspan=2, sticky="ew")
+        footer.grid(row=2, column=0, sticky="ew")
         footer.grid_columnconfigure(1, weight=1)
         footer.grid_propagate(False)
 
@@ -733,13 +747,13 @@ class KaraokeApp(ctk.CTk):
         # UI hazırlık
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.step_progress.reset_all()
+        self.manual_step_progress.reset_all()
         
         # Mark step 0 & 1 as done (skipped)
-        self.step_progress.set_step_state(0, "done")
-        self.step_progress.set_step_state(1, "done")
+        self.manual_step_progress.set_step_state(0, "done")
+        self.manual_step_progress.set_step_state(1, "done")
         
-        self.log_panel.clear()
+        self.manual_log_panel.clear()
         self._is_processing = True
 
         json_name = os.path.basename(json_path)
@@ -749,10 +763,10 @@ class KaraokeApp(ctk.CTk):
         ass_path = os.path.join(output_dir, "temp_manual_render.ass")
         lrc_path = os.path.join(output_dir, song_name + "_edited.lrc")
 
-        self.log_panel.log("═══════════════════════════════════", "info")
-        self.log_panel.log("Manuel Karaoke video üretimi başlatıldı!", "accent")
-        self.log_panel.log(f"Şarkı: {song_name} | Toplam Kelime: {len(words)}", "info")
-        self.log_panel.log("═══════════════════════════════════", "info")
+        self.manual_log_panel.log("═══════════════════════════════════", "info")
+        self.manual_log_panel.log("Manuel Karaoke video üretimi başlatıldı!", "accent")
+        self.manual_log_panel.log(f"Şarkı: {song_name} | Toplam Kelime: {len(words)}", "info")
+        self.manual_log_panel.log("═══════════════════════════════════", "info")
 
         from src.engine.subtitle_gen import SubtitleGenerator
         from src.engine.video_renderer import VideoRenderer
@@ -766,13 +780,13 @@ class KaraokeApp(ctk.CTk):
             transcriber=None, # type: ignore
             sub_gen=sub_gen,
             renderer=renderer,
-            on_log=self.log_panel.log
+            on_log=self.manual_log_panel.log
         )
         
         # Pipeline callbacks setup
-        self.pipeline.on_step_start = self._step_start
-        self.pipeline.on_step_progress = self._step_progress
-        self.pipeline.on_step_done = self._step_done
+        self.pipeline.on_step_start = self._manual_step_start
+        self.pipeline.on_step_progress = self._manual_step_progress
+        self.pipeline.on_step_done = self._manual_step_done
 
         # Arkaplanda işle
         self._processing_thread = threading.Thread(
@@ -807,7 +821,9 @@ class KaraokeApp(ctk.CTk):
         if self.pipeline:
             self.pipeline.cancel()
         self._is_processing = False
-        self.log_panel.log("İşlem iptal ediliyor...", "warning")
+        active_tab = self.tabview.get()
+        logp = self.log_panel if active_tab == "Otomatik Oluştur" else self.manual_log_panel
+        logp.log("İşlem iptal ediliyor...", "warning")
         self._set_status("İptal edildi")
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
@@ -843,17 +859,33 @@ class KaraokeApp(ctk.CTk):
     def _step_done(self, index: int):
         self.after(0, lambda: self.step_progress.set_step_state(index, "done"))
 
+    def _manual_step_start(self, index: int, name: str = ""):
+        self.after(0, lambda: self.manual_step_progress.set_step_state(index, "running"))
+        step_name = name if name else StepProgressBar.STEPS[index][1]
+        self.after(0, lambda: self._set_status(
+            f"Adım {index + 1}/4: {step_name}..."
+        ))
+
+    def _manual_step_progress(self, index: int, value: float):
+        self.after(0, lambda: self.manual_step_progress.update_progress(index, value))
+
+    def _manual_step_done(self, index: int):
+        self.after(0, lambda: self.manual_step_progress.set_step_state(index, "done"))
+
     def _on_complete(self, output_path: str, lrc_path: str):
         self._is_processing = False
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
         self._set_status("✅ Karaoke videosu başarıyla oluşturuldu!")
 
-        self.log_panel.log("═══════════════════════════════════", "success")
-        self.log_panel.log("TÜM ADIMLAR TAMAMLANDI!", "success")
-        self.log_panel.log(f"Video: {output_path}", "accent")
-        self.log_panel.log(f"Şarkı Sözleri (.lrc): {lrc_path}", "accent")
-        self.log_panel.log("═══════════════════════════════════", "success")
+        active_tab = self.tabview.get()
+        logp = self.log_panel if active_tab == "Otomatik Oluştur" else self.manual_log_panel
+
+        logp.log("═══════════════════════════════════", "success")
+        logp.log("TÜM ADIMLAR TAMAMLANDI!", "success")
+        logp.log(f"Video: {output_path}", "accent")
+        logp.log(f"Şarkı Sözleri (.lrc): {lrc_path}", "accent")
+        logp.log("═══════════════════════════════════", "success")
 
         # Tamamlandı penceresi
         result = messagebox.askyesno(
@@ -871,12 +903,16 @@ class KaraokeApp(ctk.CTk):
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
 
+        active_tab = self.tabview.get()
+        prog = self.step_progress if active_tab == "Otomatik Oluştur" else self.manual_step_progress
+        logp = self.log_panel if active_tab == "Otomatik Oluştur" else self.manual_log_panel
+
         for i in range(4):
-            if self.step_progress.step_widgets[i]._icon_label.cget("text") not in ("✓", "✗"):
-                self.step_progress.set_step_state(i, "error")
+            if prog.step_widgets[i]._icon_label.cget("text") not in ("✓", "✗"):
+                prog.set_step_state(i, "error")
                 break
 
-        self.log_panel.log(f"HATA: {error}", "error")
+        logp.log(f"HATA: {error}", "error")
         self._set_status(f"❌ Hata: {error[:60]}...")
 
         messagebox.showerror("Hata Oluştu", f"İşlem sırasında hata:\n\n{error}")
