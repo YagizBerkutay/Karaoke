@@ -449,11 +449,12 @@ class KaraokeApp(ctk.CTk):
             self.after(0, lambda: self._on_complete(results["video"], results["lrc"]))
 
         except Exception as e:
-            if "İşlem kullanıcı tarafından iptal edildi" in str(e):
+            err_msg = str(e)
+            if "İşlem kullanıcı tarafından iptal edildi" in err_msg:
                 self.after(0, lambda: self._set_status("İptal edildi"))
             else:
                 tb = traceback.format_exc()
-                self.after(0, lambda: self._on_error(str(e), tb))
+                self.after(0, lambda err=err_msg, t=tb: self._on_error(err, t))
 
     def _step_start(self, index: int):
         self.after(0, lambda: self.step_progress.set_step_state(index, "running"))
