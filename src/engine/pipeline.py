@@ -91,6 +91,17 @@ class KaraokePipeline:
             self.on_step_done(1)
             self.on_log(f"Söz tanıma tamamlandı: {len(words)} kelime bulundu.", "success")
 
+            # JSON kelime zamanlamalarını kaydet
+            song_name = Path(mp3_path).name.rsplit(".", 1)[0]
+            words_json_path = os.path.join(output_dir, song_name + "_words.json")
+            import json
+            try:
+                with open(words_json_path, "w", encoding="utf-8") as f:
+                    json.dump(words, f, ensure_ascii=False, indent=4)
+                self.on_log(f"Kelime zamanlamaları kaydedildi: {song_name}_words.json", "info")
+            except Exception as e:
+                self.on_log(f"Kelime zamanlamaları kaydedilemedi: {e}", "warning")
+
             # ── Adım 3: Altyazı Üretme ───────────────────────────────────────
             self.check_cancelled()
             self.on_step_start(2, "Altyazı Üretme")
@@ -134,3 +145,44 @@ class KaraokePipeline:
             raise ce
         finally:
             temp.cleanup()
+
+    def run_from_words(self, words: list, accomp_path: str, output_path: str, ass_path: str, lrc_path: str) -> None:
+        """Kelimelerden doğrudan karaoke videosu üretir (Ses ayrıştırma ve söz tanımayı atlar)."""
+        self._is_cancelled = False
+        
+        try:
+            # ── Adım 3: Altyazı Üretme ───────────────────────────────────────
+            self.check_cancelled()
+            self.on_step_start(2, "Altyazı Üretme")
+            
+            if hasattr(self.sub_gen, "on_log"):
+                self.sub_gen.on_log = self.on_log
+                
+            self.sub_gen.generate(words, ass_path)
+            self.sub_gen.generate_lrc(words, lrc_path)
+            
+            self.check_cancelled()
+            self.on_step_done(2)
+            self.on_log("Altyazı oluşturuldu (.ass + .lrc)", "success")
+
+            # ── Adım 4: Video Render ─────────────────────────────────────────
+            self.check_cancelled()
+            self.on_step_start(3, "Video Render")
+            
+            if hasattr(self.renderer, "on_progress"):
+                self.renderer.on_progress = lambda p: self.on_step_progress(3, p)
+            if hasattr(self.renderer, "on_log"):
+                self.renderer.on_log = self.on_log
+
+            # Renderer'a cancellation callback'ini geçiyoruz
+            if hasattr(self.renderer, "render_with_cancel"):
+                self.renderer.render_with_cancel(accomp_path, ass_path, output_path, self.check_cancelled)
+            else:
+                self.renderer.render(accomp_path, ass_path, output_path)
+                
+            self.on_step_done(3)
+            self.on_log("Video başarıyla oluşturuldu!", "success")
+            
+        except PipelineCancelledException as ce:
+            self.on_log("İşlem iptal edildi.", "warning")
+            raise ce
